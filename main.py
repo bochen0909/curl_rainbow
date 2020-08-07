@@ -115,7 +115,10 @@ def save_memory(memory, memory_path, disable_bzip):
 
 
 # Environment
-env = LocalProcEnv.Env(args) if(args.game in procgen.env.ENV_NAMES) else Env(args)
+env = LocalProcEnv2.Env(args) if(args.game in procgen.env.ENV_NAMES) else Env(args)
+
+args.is_procgen=False;
+
 env.train()
 action_space = env.action_space()
 
