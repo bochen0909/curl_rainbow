@@ -16,6 +16,7 @@ from torch.nn import functional as F
 
 # Factorised NoisyLinear layer with bias
 class NoisyLinear(nn.Module):
+
   def __init__(self, in_features, out_features, std_init=0.5):
     super(NoisyLinear, self).__init__()
     self.module_name = 'noisy_linear'
@@ -56,40 +57,63 @@ class NoisyLinear(nn.Module):
 
 
 class DQN(nn.Module):
-  def __init__(self, args, action_space):
+
+  def __init__(self,  args, action_space):
     super(DQN, self).__init__()
     self.atoms = args.atoms
+    is_procgen = args.is_procgen;
     self.action_space = action_space
-
-    if args.architecture == 'canonical':
-      self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 8, stride=4, padding=0), nn.ReLU(),
-                                 nn.Conv2d(32, 64, 4, stride=2, padding=0), nn.ReLU(),
-                                 nn.Conv2d(64, 64, 3, stride=1, padding=0), nn.ReLU())
-      self.conv_output_size = 3136
-    elif args.architecture == 'data-efficient':
-      self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 5, stride=5, padding=0), nn.ReLU(),
-                                 nn.Conv2d(32, 64, 5, stride=5, padding=0), nn.ReLU())
-      self.conv_output_size = 576
-    self.fc_h_v = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
-    self.fc_h_a = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
-    self.fc_z_v = NoisyLinear(args.hidden_size, self.atoms, std_init=args.noisy_std)
-    self.fc_z_a = NoisyLinear(args.hidden_size, action_space * self.atoms, std_init=args.noisy_std)
-
-    self.W_h = nn.Parameter(torch.rand(self.conv_output_size, args.hidden_size))
-    self.W_c = nn.Parameter(torch.rand(args.hidden_size, 128))
-    self.b_h = nn.Parameter(torch.zeros(args.hidden_size))
-    self.b_c = nn.Parameter(torch.zeros(128))
-    self.W = nn.Parameter(torch.rand(128, 128))
+    if(is_procgen):
+        if args.architecture == 'canonical':
+          self.convs = nn.Sequential(nn.Conv3d(args.history_length, 32, [8,8,3], stride=4, padding=0), nn.ReLU(),
+                                     nn.Conv3d(32, 64, 4, stride=2, padding=0), nn.ReLU(),
+                                     nn.Conv3d(64, 64, 3, stride=1, padding=0), nn.ReLU())
+          self.conv_output_size = 3136
+        elif args.architecture == 'data-efficient':
+          self.convs = nn.Sequential(nn.Conv3d(args.history_length, 32, [3,3,3], stride=5, padding=0), nn.ReLU(),
+                                     nn.Conv3d(32, 64, [1,3,3], stride=5, padding=0), nn.ReLU())
+          self.conv_output_size = 576
+        self.fc_h_v = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
+        self.fc_h_a = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
+        self.fc_z_v = NoisyLinear(args.hidden_size, self.atoms, std_init=args.noisy_std)
+        self.fc_z_a = NoisyLinear(args.hidden_size, action_space * self.atoms, std_init=args.noisy_std)
+    
+        self.W_h = nn.Parameter(torch.rand(self.conv_output_size, args.hidden_size))
+        self.W_c = nn.Parameter(torch.rand(args.hidden_size, 128))
+        self.b_h = nn.Parameter(torch.zeros(args.hidden_size))
+        self.b_c = nn.Parameter(torch.zeros(128))
+        self.W = nn.Parameter(torch.rand(128, 128))
+        
+    else:
+        if args.architecture == 'canonical':
+          self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 8, stride=4, padding=0), nn.ReLU(),
+                                     nn.Conv2d(32, 64, 4, stride=2, padding=0), nn.ReLU(),
+                                     nn.Conv2d(64, 64, 3, stride=1, padding=0), nn.ReLU())
+          self.conv_output_size = 3136
+        elif args.architecture == 'data-efficient':
+          self.convs = nn.Sequential(nn.Conv2d(args.history_length, 32, 5, stride=5, padding=0), nn.ReLU(),
+                                     nn.Conv2d(32, 64, 5, stride=5, padding=0), nn.ReLU())
+          self.conv_output_size = 576
+        self.fc_h_v = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
+        self.fc_h_a = NoisyLinear(self.conv_output_size, args.hidden_size, std_init=args.noisy_std)
+        self.fc_z_v = NoisyLinear(args.hidden_size, self.atoms, std_init=args.noisy_std)
+        self.fc_z_a = NoisyLinear(args.hidden_size, action_space * self.atoms, std_init=args.noisy_std)
+    
+        self.W_h = nn.Parameter(torch.rand(self.conv_output_size, args.hidden_size))
+        self.W_c = nn.Parameter(torch.rand(args.hidden_size, 128))
+        self.b_h = nn.Parameter(torch.zeros(args.hidden_size))
+        self.b_c = nn.Parameter(torch.zeros(128))
+        self.W = nn.Parameter(torch.rand(128, 128))
 
   def forward(self, x, log=False):
     x = self.convs(x)
     x = x.view(-1, self.conv_output_size)
     v = self.fc_z_v(F.relu(self.fc_h_v(x)))  # Value stream
     a = self.fc_z_a(F.relu(self.fc_h_a(x)))  # Advantage stream
-    h = torch.matmul(x, self.W_h) + self.b_h # Contrastive head
+    h = torch.matmul(x, self.W_h) + self.b_h  # Contrastive head
     h = nn.LayerNorm(h.shape[1])(h)
     h = F.relu(h)
-    h = torch.matmul(h, self.W_c) + self.b_c # Contrastive head
+    h = torch.matmul(h, self.W_c) + self.b_c  # Contrastive head
     h = nn.LayerNorm(128)(h)
     v, a = v.view(-1, 1, self.atoms), a.view(-1, self.action_space, self.atoms)
     q = v + a - a.mean(1, keepdim=True)  # Combine streams

@@ -13,12 +13,13 @@ import numpy as np
 import torch
 from torch import optim
 from torch.nn.utils import clip_grad_norm_
-import kornia.augmentation as aug
+import kornia.augmentation as aug_
 import torch.nn as nn
 from model import DQN
 
-random_shift = nn.Sequential(aug.RandomCrop((80, 80)), nn.ReplicationPad2d(4), aug.RandomCrop((84, 84)))
-aug = random_shift
+
+aug_art = nn.Sequential(aug_.RandomCrop((80, 80)), nn.ReplicationPad2d(4), aug_.RandomCrop((84, 84)))
+aug_procgen = nn.Sequential(aug_.RandomCrop((60, 60)), nn.ReplicationPad2d(4), aug_.RandomCrop((64, 64)))
 
 class Agent():
   def __init__(self, args, env):
@@ -33,6 +34,11 @@ class Agent():
     self.n = args.multi_step
     self.discount = args.discount
     self.norm_clip = args.norm_clip
+    self.is_procgen=args.is_procgen;
+    if(self.is_procgen):
+        self.aug=aug_procgen
+    else:
+        self.aug=aug_art
     self.coeff = 0.01 if args.game in ['pong', 'boxing', 'private_eye', 'freeway'] else 1.
 
     self.online_net = DQN(args, self.action_space).to(device=args.device)
@@ -80,8 +86,15 @@ class Agent():
   def learn(self, mem):
     # Sample transitions
     idxs, states, actions, returns, next_states, nonterminals, weights = mem.sample(self.batch_size)
-    aug_states_1 = aug(states).to(device=self.args.device)
-    aug_states_2 = aug(states).to(device=self.args.device)
+    if self.is_procgen:
+        tmpstates=states.view(-1,12,64,64)
+    else:
+        tmpstates = states
+    aug_states_1 = self.aug(tmpstates).to(device=self.args.device)
+    aug_states_2 = self.aug(tmpstates).to(device=self.args.device)
+    if self.is_procgen:
+        aug_states_1=aug_states_1.view(-1,4,3,64,64)
+        aug_states_2=aug_states_2.view(-1,4,3,64,64)
     # Calculate current state probabilities (online network noise already sampled)
     log_ps, _ = self.online_net(states, log=True)  # Log probabilities log p(s_t, ·; θonline)
     _, z_anch = self.online_net(aug_states_1, log=True)

@@ -14,7 +14,8 @@ import torch
 
 
 Transition = namedtuple('Transition', ('timestep', 'state', 'action', 'reward', 'nonterminal'))
-blank_trans = Transition(0, torch.zeros(84, 84, dtype=torch.uint8), None, 0, False)
+blank_trans_atr = Transition(0, torch.zeros( 84, 84, dtype=torch.uint8), None, 0, False)
+blank_trans_procgen = Transition(0, torch.zeros(3, 64, 64, dtype=torch.uint8), None, 0, False)
 
 
 # Segment tree data structure where parent node values are sum/max of children node values
@@ -82,7 +83,11 @@ class ReplayMemory():
     self.priority_exponent = args.priority_exponent
     self.t = 0  # Internal episode timestep counter
     self.transitions = SegmentTree(capacity)  # Store transitions in a wrap-around cyclic buffer within a sum tree for querying priorities
-
+    self.is_procgen=args.is_procgen
+    if(self.is_procgen):
+        self.blank_trans=blank_trans_procgen
+    else:
+        self.blank_trans=blank_trans_atr
   # Adds state and action at time t, reward and terminal at time t + 1
   def append(self, state, action, reward, terminal):
     state = state[-1].mul(255).to(dtype=torch.uint8, device=torch.device('cpu'))  # Only store last frame and discretise to save memory
@@ -95,14 +100,14 @@ class ReplayMemory():
     transition[self.history - 1] = self.transitions.get(idx)
     for t in range(self.history - 2, -1, -1):  # e.g. 2 1 0
       if transition[t + 1].timestep == 0:
-        transition[t] = blank_trans  # If future frame has timestep 0
+        transition[t] = self.blank_trans  # If future frame has timestep 0
       else:
         transition[t] = self.transitions.get(idx - self.history + 1 + t)
     for t in range(self.history, self.history + self.n):  # e.g. 4 5 6
       if transition[t - 1].nonterminal:
         transition[t] = self.transitions.get(idx - self.history + 1 + t)
       else:
-        transition[t] = blank_trans  # If prev (next) frame is terminal
+        transition[t] = self.blank_trans  # If prev (next) frame is terminal
     return transition
 
   # Returns a valid sample from a segment
@@ -118,6 +123,7 @@ class ReplayMemory():
     # Retrieve all required transition data (from t - h to t + n)
     transition = self._get_transition(idx)
     # Create un-discretised state and nth next state
+    
     state = torch.stack([trans.state for trans in transition[:self.history]]).to(device=self.device).to(dtype=torch.float32).div_(255)
     next_state = torch.stack([trans.state for trans in transition[self.n:self.n + self.history]]).to(device=self.device).to(dtype=torch.float32).div_(255)
     # Discrete action to be used as index
